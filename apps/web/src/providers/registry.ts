@@ -58,6 +58,10 @@ import {
   isOpenDesignHostAvailable,
   openHostExternalUrl,
 } from '@open-design/host';
+import {
+  findStaticOfficialPlugin,
+  staticOfficialPluginAssetUrl,
+} from '../static-official-plugins';
 
 export const DEFAULT_DEPLOY_PROVIDER_ID = 'vercel-self';
 export const CLOUDFLARE_PAGES_PROVIDER_ID = 'cloudflare-pages';
@@ -1802,9 +1806,11 @@ export async function fetchPluginPreviewHtml(
     const resp = await fetch(
       `/api/plugins/${encodeURIComponent(id)}/preview`,
     );
-    if (!resp.ok) return { error: `HTTP ${resp.status}` };
+    if (!resp.ok) return fetchStaticPluginPreviewHtml(id) ?? { error: `HTTP ${resp.status}` };
     return { html: await resp.text() };
   } catch (err) {
+    const fallback = fetchStaticPluginPreviewHtml(id);
+    if (fallback) return fallback;
     const message = err instanceof Error ? err.message : 'network error';
     return { error: message };
   }
@@ -1820,9 +1826,13 @@ export async function fetchPluginExampleHtml(
     const resp = await fetch(
       `/api/plugins/${encodeURIComponent(pluginId)}/example/${encodeURIComponent(stem)}`,
     );
-    if (!resp.ok) return { error: `HTTP ${resp.status}` };
+    if (!resp.ok) {
+      return fetchStaticPluginExampleHtml(pluginId, stem) ?? { error: `HTTP ${resp.status}` };
+    }
     return { html: await resp.text() };
   } catch (err) {
+    const fallback = fetchStaticPluginExampleHtml(pluginId, stem);
+    if (fallback) return fallback;
     const message = err instanceof Error ? err.message : 'network error';
     return { error: message };
   }
@@ -1841,10 +1851,61 @@ export async function fetchPluginAssetText(
     const resp = await fetch(
       `/api/plugins/${encodeURIComponent(pluginId)}/asset/${encodePluginAssetPath(relpath)}`,
     );
+    if (!resp.ok) return await fetchStaticPluginAssetText(pluginId, relpath);
+    return await resp.text();
+  } catch {
+    return await fetchStaticPluginAssetText(pluginId, relpath);
+  }
+}
+
+function fetchStaticPluginPreviewHtml(id: string): Promise<SkillExampleResult> | null {
+  const record = findStaticOfficialPlugin(id);
+  const preview = record?.manifest.od?.preview;
+  const entry =
+    preview && typeof preview === 'object' && typeof preview.entry === 'string'
+      ? preview.entry
+      : null;
+  const url = record && entry ? staticOfficialPluginAssetUrl(record, entry) : null;
+  return url ? fetchStaticHtml(url) : null;
+}
+
+function fetchStaticPluginExampleHtml(
+  pluginId: string,
+  stem: string,
+): Promise<SkillExampleResult> | null {
+  const record = findStaticOfficialPlugin(pluginId);
+  const outputs = record?.manifest.od?.useCase?.exampleOutputs;
+  const match = Array.isArray(outputs)
+    ? outputs.find((entry) => {
+        if (!entry || typeof entry.path !== 'string') return false;
+        const base = entry.path.split(/[\\/]/).filter(Boolean).pop() ?? '';
+        return base.replace(/\.[^.]+$/, '') === stem;
+      })
+    : null;
+  const url = record && match?.path ? staticOfficialPluginAssetUrl(record, match.path) : null;
+  return url ? fetchStaticHtml(url) : null;
+}
+
+async function fetchStaticPluginAssetText(pluginId: string, relpath: string): Promise<string | null> {
+  const record = findStaticOfficialPlugin(pluginId);
+  const url = record ? staticOfficialPluginAssetUrl(record, relpath) : null;
+  if (!url) return null;
+  try {
+    const resp = await fetch(url);
     if (!resp.ok) return null;
     return await resp.text();
   } catch {
     return null;
+  }
+}
+
+async function fetchStaticHtml(url: string): Promise<SkillExampleResult> {
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) return { error: `HTTP ${resp.status}` };
+    return { html: await resp.text() };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'network error' };
   }
 }
 

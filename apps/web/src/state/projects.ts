@@ -20,6 +20,10 @@ import type {
   ProjectPluginFolderInstallRequest,
 } from '@open-design/contracts';
 import { randomUUID } from '../utils/uuid';
+import {
+  findStaticOfficialPlugin,
+  listStaticOfficialPlugins,
+} from '../static-official-plugins';
 import type {
   ChatMessage,
   Conversation,
@@ -426,14 +430,16 @@ export interface ListPluginsOptions {
 export async function listPlugins(
   options: ListPluginsOptions = {},
 ): Promise<InstalledPluginRecord[]> {
+  const filter = (plugins: InstalledPluginRecord[]) =>
+    options.includeHidden ? plugins : plugins.filter(isVisiblePlugin);
   try {
     const resp = await fetch('/api/plugins');
-    if (!resp.ok) return [];
+    if (!resp.ok) return filter(listStaticOfficialPlugins());
     const json = (await resp.json()) as { plugins?: InstalledPluginRecord[] };
     const plugins = json.plugins ?? [];
-    return options.includeHidden ? plugins : plugins.filter(isVisiblePlugin);
+    return filter(plugins.length > 0 ? plugins : listStaticOfficialPlugins());
   } catch {
-    return [];
+    return filter(listStaticOfficialPlugins());
   }
 }
 
@@ -955,12 +961,136 @@ export async function applyPlugin(
         }),
       },
     );
-    if (!resp.ok) return null;
+    if (!resp.ok) return applyStaticOfficialPlugin(pluginId, options);
     const json = (await resp.json()) as ApplyResult & { ok?: boolean };
     return json;
   } catch {
-    return null;
+    return applyStaticOfficialPlugin(pluginId, options);
   }
+}
+
+function applyStaticOfficialPlugin(
+  pluginId: string,
+  options: {
+    inputs?: Record<string, unknown>;
+    projectId?: string;
+    grantCaps?: string[];
+    locale?: string;
+  },
+): ApplyResult | null {
+  const record = findStaticOfficialPlugin(pluginId);
+  if (!record) return null;
+  const manifest = record.manifest;
+  const od = manifest.od ?? {};
+  const inputFields = Array.isArray(od.inputs) ? od.inputs : [];
+  const inputs = resolveStaticPluginInputs(inputFields, options.inputs ?? {});
+  const query = renderStaticPluginQuery(od.useCase?.query, inputs, options.locale);
+  const taskKind = normalizeTaskKind(od.taskKind);
+  const pipeline = od.pipeline;
+  const caps = Array.from(
+    new Set([
+      ...(Array.isArray(record.capabilitiesGranted) ? record.capabilitiesGranted : []),
+      ...(Array.isArray(options.grantCaps) ? options.grantCaps : []),
+    ]),
+  );
+  const capabilitiesRequired = Array.isArray(od.capabilities) ? od.capabilities : [];
+  const mcpServers = Array.isArray(od.mcpServers) ? od.mcpServers : [];
+  const genuiSurfaces = Array.isArray(od.genuiSurfaces) ? od.genuiSurfaces : [];
+  const now = Date.now();
+  return {
+    query,
+    contextItems: [],
+    inputs: inputFields,
+    assets: [],
+    mcpServers,
+    ...(pipeline ? { pipeline } : {}),
+    genuiSurfaces,
+    projectMetadata: { taskKind },
+    trust: 'trusted',
+    capabilitiesGranted: caps,
+    capabilitiesRequired,
+    appliedPlugin: {
+      snapshotId: `static-${record.id}-${now}`,
+      pluginId: record.id,
+      pluginSpecVersion: manifest.specVersion,
+      pluginVersion: record.version,
+      manifestSourceDigest: record.manifestDigest ?? `static:${record.id}:${record.version}`,
+      sourceMarketplaceId: record.sourceMarketplaceId,
+      sourceMarketplaceEntryName: record.sourceMarketplaceEntryName,
+      sourceMarketplaceEntryVersion: record.sourceMarketplaceEntryVersion,
+      marketplaceTrust: record.marketplaceTrust,
+      resolvedSource: record.resolvedSource ?? record.source,
+      resolvedRef: record.resolvedRef,
+      archiveIntegrity: record.archiveIntegrity,
+      pinnedRef: record.pinnedRef,
+      inputs,
+      resolvedContext: { items: [] },
+      capabilitiesGranted: caps,
+      capabilitiesRequired,
+      assetsStaged: [],
+      taskKind,
+      appliedAt: now,
+      connectorsRequired: Array.isArray(od.connectors) ? od.connectors : [],
+      connectorsResolved: [],
+      mcpServers,
+      ...(pipeline ? { pipeline } : {}),
+      genuiSurfaces,
+      pluginTitle: record.title,
+      pluginDescription: record.manifest.description,
+      query,
+      status: 'fresh',
+    },
+  };
+}
+
+function resolveStaticPluginInputs(
+  fields: ApplyResult['inputs'],
+  provided: Record<string, unknown>,
+): Record<string, string | number | boolean> {
+  const out: Record<string, string | number | boolean> = {};
+  for (const field of fields) {
+    const value = provided[field.name] ?? field.default;
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      out[field.name] = value;
+    }
+  }
+  for (const [key, value] of Object.entries(provided)) {
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
+function renderStaticPluginQuery(
+  raw: unknown,
+  inputs: Record<string, string | number | boolean>,
+  locale?: string,
+): string {
+  const template =
+    typeof raw === 'string'
+      ? raw
+      : raw && typeof raw === 'object'
+        ? String(
+            (raw as Record<string, unknown>)[locale ?? ''] ??
+              (raw as Record<string, unknown>).en ??
+              Object.values(raw as Record<string, unknown>).find((value) => typeof value === 'string') ??
+              '',
+          )
+        : '';
+  return template.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (_match, key: string) => {
+    const value = inputs[key];
+    return value == null ? '' : String(value);
+  });
+}
+
+function normalizeTaskKind(value: unknown): ApplyResult['appliedPlugin']['taskKind'] {
+  return value === 'code-migration' ||
+    value === 'figma-migration' ||
+    value === 'tune-collab' ||
+    value === 'new-generation'
+    ? value
+    : 'new-generation';
 }
 
 async function readErrorMessage(resp: Response): Promise<string> {

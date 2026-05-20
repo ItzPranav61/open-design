@@ -17,6 +17,7 @@
 // classification without touching React.
 
 import type { InstalledPluginRecord } from '@open-design/contracts';
+import { staticOfficialPluginAssetUrl } from '../../static-official-plugins';
 
 export type PluginPreviewKind = 'media' | 'html' | 'design' | 'text';
 
@@ -177,8 +178,8 @@ export function inferPluginPreview(
       return {
         kind: 'media',
         mediaType: 'video',
-        poster: poster ?? gif ?? null,
-        videoUrl: video,
+        poster: staticOfficialPluginAssetUrl(record, poster ?? gif) ?? poster ?? gif ?? null,
+        videoUrl: staticOfficialPluginAssetUrl(record, video) ?? video,
         audioUrl: null,
         imageOnly: !video,
       };
@@ -187,9 +188,9 @@ export function inferPluginPreview(
       return {
         kind: 'media',
         mediaType: 'audio',
-        poster: poster ?? gif ?? null,
+        poster: staticOfficialPluginAssetUrl(record, poster ?? gif) ?? poster ?? gif ?? null,
         videoUrl: null,
-        audioUrl: audio,
+        audioUrl: staticOfficialPluginAssetUrl(record, audio) ?? audio,
         imageOnly: false,
       };
     }
@@ -197,7 +198,7 @@ export function inferPluginPreview(
       return {
         kind: 'media',
         mediaType: 'image',
-        poster: poster ?? gif ?? null,
+        poster: staticOfficialPluginAssetUrl(record, poster ?? gif) ?? poster ?? gif ?? null,
         videoUrl: null,
         audioUrl: null,
         imageOnly: true,
@@ -206,7 +207,9 @@ export function inferPluginPreview(
     if (t === 'html' && entry) {
       return {
         kind: 'html',
-        src: `/api/plugins/${encodeURIComponent(record.id)}/preview`,
+        src:
+          staticOfficialPluginAssetUrl(record, entry) ??
+          `/api/plugins/${encodeURIComponent(record.id)}/preview`,
         label: entry.replace(/^\.\//, '').split(/[\\/]/).pop() ?? entry,
         source: 'preview',
       };
@@ -220,7 +223,9 @@ export function inferPluginPreview(
         typeof examples[0]!.title === 'string' ? (examples[0]!.title as string) : stem;
       return {
         kind: 'html',
-        src: `/api/plugins/${encodeURIComponent(record.id)}/example/${encodeURIComponent(stem)}`,
+        src:
+          staticOfficialPluginAssetUrl(record, examples[0]!.path as string) ??
+          `/api/plugins/${encodeURIComponent(record.id)}/example/${encodeURIComponent(stem)}`,
         label: title,
         source: 'example',
         exampleStem: stem,
