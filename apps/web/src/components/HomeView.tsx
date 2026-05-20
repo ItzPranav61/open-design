@@ -148,7 +148,7 @@ const AUTHORING_DEFAULT_SCENARIO_INPUTS = {
 interface Props {
   projects: Project[];
   projectsLoading?: boolean;
-  onSubmit: (payload: PluginLoopSubmit) => void;
+  onSubmit: (payload: PluginLoopSubmit) => void | boolean | Promise<void | boolean>;
   onOpenProject: (id: string) => void;
   onViewAllProjects: () => void;
   onBrowseRegistry?: () => void;
@@ -1153,7 +1153,7 @@ export function HomeView({
     const submittedProjectMetadata = submittedActive?.mediaSurface
       ? metadataForHomeMediaComposer(submittedActive.mediaSurface, submittedActive.inputs, promptTemplates)
       : submittedActive?.projectMetadata ?? null;
-    onSubmit({
+    const submitted = await onSubmit({
       prompt: trimmed,
       pluginId: submittedActive?.record.id ?? DEFAULT_UNSELECTED_SCENARIO_PLUGIN_ID,
       skillId: activeSkill?.id ?? null,
@@ -1168,6 +1168,11 @@ export function HomeView({
       contextConnectors,
       attachments: stagedFiles,
     });
+    if (submitted === false) {
+      setError(
+        'Open Design cannot send from this hosted preview because the local daemon API is not running here. Start Open Design locally with `pnpm tools-dev start web`, open the local URL from `pnpm tools-dev status`, then send again.',
+      );
+    }
   }
 
   return (
