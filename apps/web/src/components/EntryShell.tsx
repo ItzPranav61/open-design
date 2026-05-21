@@ -464,7 +464,7 @@ export function EntryShell({
         ? { contextConnectors: payload.contextConnectors }
         : {}),
     };
-    onCreateProject({
+    return onCreateProject({
       name,
       skillId: payload.skillId ?? null,
       designSystemId: null,
